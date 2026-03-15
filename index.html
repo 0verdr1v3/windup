@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WindUp — Power Plant Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #111; display: flex; justify-content: center; align-items: flex-start; padding: 24px; min-height: 100vh; font-family: monospace; }
+  .plant { background: #1a1a2e; border-radius: 12px; overflow: hidden; user-select: none; width: 100%; max-width: 780px; }
+  .top-bar { background: #0f0f1a; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #2a2a3e; }
+  .top-title { color: #e0e0e0; font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #27c93f; display: inline-block; margin-right: 6px; }
+  .status-dot.idle { background: #888; }
+  .status-dot.generating { background: #f0a500; }
+  .main-area { display: grid; grid-template-columns: 1fr 260px; gap: 0; }
+  .scene { padding: 16px; }
+  .panel { background: #0f0f1a; border-left: 1px solid #2a2a3e; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .panel-label { font-size: 9px; letter-spacing: 0.18em; color: #555; text-transform: uppercase; margin-bottom: 4px; }
+  .metric { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 6px; padding: 10px 12px; }
+  .metric-val { font-size: 22px; font-weight: 500; color: #e0e0e0; line-height: 1; }
+  .metric-unit { font-size: 11px; color: #555; margin-top: 2px; }
+  .metric-val.green { color: #27c93f; }
+  .metric-val.amber { color: #f0a500; }
+  .btn { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #3a3a5e; background: #1a1a2e; color: #e0e0e0; font-size: 12px; cursor: pointer; letter-spacing: 0.05em; transition: background 0.15s; font-family: monospace; }
+  .btn:hover { background: #2a2a4e; }
+  .btn:active { transform: scale(0.97); }
+  .btn.primary { background: #1e3a5f; border-color: #378add; color: #85b7eb; }
+  .btn.primary:hover { background: #2a4a6f; }
+  .btn.danger { background: #3a1a1a; border-color: #a32d2d; color: #f09595; }
+  .btn.danger:hover { background: #4a2a2a; }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .locks-grid { display: flex; flex-direction: column; gap: 6px; }
+  .lock-row { display: flex; align-items: center; gap: 8px; }
+  .lock-label { font-size: 11px; color: #555; width: 40px; }
+  .lock-btn { flex: 1; padding: 7px; border-radius: 4px; border: 1px solid #2a2a3e; background: #1a1a2e; color: #555; font-size: 11px; cursor: pointer; transition: all 0.15s; font-family: monospace; }
+  .lock-btn.locked { background: #1e3a1e; border-color: #27c93f; color: #27c93f; }
+  .lock-btn.locked:hover { background: #2a4a2a; }
+  .lock-btn.unlocked { background: #3a1a1a; border-color: #a32d2d; color: #f09595; }
+  .log { background: #0a0a12; border: 1px solid #2a2a3e; border-radius: 6px; padding: 8px; font-size: 10px; color: #444; height: 80px; overflow-y: auto; font-family: monospace; }
+  .log-line { margin-bottom: 2px; }
+  .log-line.green { color: #27c93f; }
+  .log-line.amber { color: #f0a500; }
+  .log-line.blue { color: #378add; }
+  .log-line.red { color: #e24b4a; }
+  .power-bar-wrap { background: #0a0a12; border: 1px solid #2a2a3e; border-radius: 4px; height: 8px; overflow: hidden; }
+  .power-bar { height: 100%; background: #27c93f; transition: width 0.3s; border-radius: 4px; }
+  .power-bar.generating { background: #f0a500; }
+  canvas { display: block; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div class="plant">
+  <div class="top-bar">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span class="status-dot" id="statusDot"></span>
+      <span class="top-title">WindUp — Power Plant Control</span>
+    </div>
+    <span id="statusText" style="font-size:11px;color:#555;">Idle</span>
+  </div>
+
+  <div class="main-area">
+    <div class="scene">
+      <canvas id="scene" width="480" height="420"></canvas>
+    </div>
+
+    <div class="panel">
+      <div>
+        <div class="panel-label">Stored energy</div>
+        <div class="metric">
+          <div class="metric-val green" id="storedVal">0</div>
+          <div class="metric-unit">MWh</div>
+          <div style="margin-top:8px;">
+            <div class="power-bar-wrap"><div class="power-bar" id="storedBar" style="width:0%"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel-label">Grid output</div>
+        <div class="metric">
+          <div class="metric-val amber" id="outputVal">0</div>
+          <div class="metric-unit">MW current</div>
+          <div style="margin-top:8px;">
+            <div class="power-bar-wrap"><div class="power-bar generating" id="outputBar" style="width:0%"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel-label">Charge / discharge</div>
+        <button class="btn primary" id="chargeBtn" onclick="startCharge()">Wind up motor</button>
+        <div style="height:6px;"></div>
+        <button class="btn" id="stopBtn" onclick="stopCharge()" disabled>Stop winding</button>
+      </div>
+
+      <div>
+        <div class="panel-label">Stage locks</div>
+        <div class="locks-grid" id="locksGrid"></div>
+      </div>
+
+      <div>
+        <div class="panel-label">System log</div>
+        <div class="log" id="log"></div>
+      </div>
+
+      <button class="btn danger" onclick="resetAll()">Reset plant</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const NUM_STAGES = 5;
+const STAGE_H = 54;
+const TOWER_X = 180;
+const TOWER_W = 80;
+const TOWER_TOP = 30;
+const GROUND_Y = 390;
+const MASS_H = 28;
+const MASS_W = 60;
+const MAX_STORED = 100;
+
+let stages = Array(NUM_STAGES).fill(false);
+let massY = GROUND_Y - MASS_H;
+let targetY = massY;
+let charging = false;
+let generating = false;
+let storedEnergy = 0;
+let outputPower = 0;
+let animFrame = null;
+let particles = [];
+let sparkTimer = 0;
+
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+
+function stageY(i) { return TOWER_TOP + (NUM_STAGES - 1 - i) * STAGE_H; }
+
+function buildLocks() {
+  const grid = document.getElementById('locksGrid');
+  grid.innerHTML = '';
+  for (let i = NUM_STAGES - 1; i >= 0; i--) {
+    const row = document.createElement('div');
+    row.className = 'lock-row';
+    const lbl = document.createElement('span');
+    lbl.className = 'lock-label';
+    lbl.textContent = 'S' + (i + 1);
+    const btn = document.createElement('button');
+    btn.className = 'lock-btn' + (stages[i] ? ' locked' : '');
+    btn.textContent = stages[i] ? 'Locked' : 'Open';
+    btn.id = 'lock' + i;
+    btn.onclick = () => toggleLock(i);
+    row.appendChild(lbl);
+    row.appendChild(btn);
+    grid.appendChild(row);
+  }
+}
+
+function updateLockUI() {
+  for (let i = 0; i < NUM_STAGES; i++) {
+    const btn = document.getElementById('lock' + i);
+    if (!btn) continue;
+    btn.className = 'lock-btn' + (stages[i] ? ' locked' : '');
+    btn.textContent = stages[i] ? 'Locked' : 'Open';
+  }
+}
+
+function toggleLock(i) {
+  if (charging) return;
+  const massStage = getMassStage();
+  if (!stages[i] && i > massStage) { addLog('Cannot lock stage above mass position', 'red'); return; }
+  stages[i] = !stages[i];
+  updateLockUI();
+  if (stages[i]) { addLog('Stage S' + (i+1) + ' locked', 'green'); checkRelease(); }
+  else { addLog('Stage S' + (i+1) + ' unlocked', 'amber'); checkRelease(); }
+}
+
+function getMassStage() {
+  const cy = massY + MASS_H / 2;
+  for (let i = NUM_STAGES - 1; i >= 0; i--) {
+    if (cy <= stageY(i) + STAGE_H) return i;
+  }
+  return -1;
+}
+
+function checkRelease() {
+  if (charging) return;
+  const massStage = getMassStage();
+  if (massStage >= 0 && stages[massStage]) return;
+  let nextLocked = -1;
+  for (let i = massStage - 1; i >= 0; i--) { if (stages[i]) { nextLocked = i; break; } }
+  if (massY < GROUND_Y - MASS_H && !charging) {
+    generating = true;
+    setStatus('generating', 'Generating');
+    targetY = nextLocked >= 0 ? stageY(nextLocked) + 2 : GROUND_Y - MASS_H;
+  }
+}
+
+function startCharge() {
+  if (storedEnergy >= MAX_STORED) { addLog('Tower at full capacity', 'red'); return; }
+  charging = true; generating = false;
+  document.getElementById('chargeBtn').disabled = true;
+  document.getElementById('stopBtn').disabled = false;
+  setStatus('active', 'Charging');
+  addLog('Motor started — winding up', 'blue');
+  targetY = TOWER_TOP + 2;
+}
+
+function stopCharge() {
+  charging = false;
+  document.getElementById('chargeBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  autoLockCurrent();
+  setStatus('idle', 'Idle');
+  addLog('Motor stopped', 'amber');
+}
+
+function autoLockCurrent() {
+  const s = getMassStage();
+  if (s >= 0 && !stages[s]) { stages[s] = true; updateLockUI(); addLog('Stage S' + (s+1) + ' auto-locked', 'green'); }
+}
+
+function setStatus(state, text) {
+  const dot = document.getElementById('statusDot');
+  const txt = document.getElementById('statusText');
+  dot.className = 'status-dot ' + (state === 'idle' ? 'idle' : state === 'generating' ? 'generating' : '');
+  txt.textContent = text;
+}
+
+function addLog(msg, cls) {
+  const log = document.getElementById('log');
+  const line = document.createElement('div');
+  line.className = 'log-line ' + (cls || '');
+  const now = new Date();
+  line.textContent = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0') + ':' + now.getSeconds().toString().padStart(2,'0') + '  ' + msg;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function spawnSpark(x, y, color) {
+  for (let i = 0; i < 5; i++) {
+    particles.push({ x, y, vx: (Math.random()-0.5)*3, vy: (Math.random()-0.5)*3-1, life: 1, color });
+  }
+}
+
+function resetAll() {
+  charging = false; generating = false;
+  massY = GROUND_Y - MASS_H; targetY = massY;
+  storedEnergy = 0; outputPower = 0;
+  stages = Array(NUM_STAGES).fill(false);
+  particles = [];
+  document.getElementById('chargeBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  setStatus('idle', 'Idle');
+  updateLockUI();
+  addLog('Plant reset', 'amber');
+  updateMetrics();
+}
+
+function updateMetrics() {
+  document.getElementById('storedVal').textContent = Math.round(storedEnergy);
+  document.getElementById('storedBar').style.width = Math.min(100, (storedEnergy / MAX_STORED) * 100) + '%';
+  document.getElementById('outputVal').textContent = Math.round(outputPower);
+  document.getElementById('outputBar').style.width = Math.min(100, (outputPower / 50) * 100) + '%';
+}
+
+function drawScene() {
+  ctx.clearRect(0, 0, 480, 420);
+  ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, 480, 420);
+  ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0, GROUND_Y, 480, 420 - GROUND_Y);
+  ctx.strokeStyle = '#2a2a3e'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, GROUND_Y); ctx.lineTo(480, GROUND_Y); ctx.stroke();
+
+  ctx.fillStyle = '#0a0e14'; ctx.strokeStyle = '#1e3a5f'; ctx.lineWidth = 1.5;
+  const tw = TOWER_W + 16; const tx = TOWER_X - 8;
+  ctx.beginPath(); ctx.rect(tx, TOWER_TOP, tw, GROUND_Y - TOWER_TOP); ctx.fill(); ctx.stroke();
+
+  ctx.strokeStyle = '#1a2a3a'; ctx.lineWidth = 0.5;
+  for (let i = 0; i < NUM_STAGES; i++) {
+    const sy = stageY(i);
+    ctx.beginPath(); ctx.moveTo(tx, sy + STAGE_H); ctx.lineTo(tx + tw, sy + STAGE_H); ctx.stroke();
+    ctx.fillStyle = '#334'; ctx.font = '10px monospace';
+    ctx.fillText('S' + (i + 1), tx + tw + 6, sy + STAGE_H / 2 + 4);
+  }
+
+  for (let i = 0; i < NUM_STAGES; i++) {
+    const sy = stageY(i); const locked = stages[i];
+    const lx1 = tx - 1; const lx2 = tx + tw; const ly = sy + STAGE_H - 6;
+    ctx.fillStyle = locked ? '#27c93f' : '#333';
+    ctx.beginPath(); ctx.rect(lx1 - 8, ly, 8, 12); ctx.fill();
+    ctx.beginPath(); ctx.rect(lx2, ly, 8, 12); ctx.fill();
+    if (locked) {
+      ctx.strokeStyle = '#27c93f'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(lx1 - 1, ly + 6); ctx.lineTo(lx1 - 8, ly + 6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(lx2, ly + 6); ctx.lineTo(lx2 + 8, ly + 6); ctx.stroke();
+      if (sparkTimer % 40 < 2) { spawnSpark(lx1 - 4, ly + 6, '#27c93f'); spawnSpark(lx2 + 4, ly + 6, '#27c93f'); }
+    }
+  }
+
+  ctx.fillStyle = '#378add'; ctx.strokeStyle = '#85b7eb'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.rect(TOWER_X + TOWER_W/2 - MASS_W/2, massY, MASS_W, MASS_H); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#042c53'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+  ctx.fillText('MASS', TOWER_X + TOWER_W/2, massY + MASS_H/2 + 4); ctx.textAlign = 'left';
+
+  ctx.strokeStyle = '#3a5a7a'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(TOWER_X + TOWER_W/2, TOWER_TOP); ctx.lineTo(TOWER_X + TOWER_W/2, massY); ctx.stroke();
+
+  const motorX = TOWER_X + TOWER_W/2; const motorY = TOWER_TOP - 14;
+  ctx.fillStyle = charging ? '#1e3a5f' : generating ? '#3a2a00' : '#1a1a2e';
+  ctx.strokeStyle = charging ? '#378add' : generating ? '#f0a500' : '#2a2a3e';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(motorX, motorY, 13, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  if (charging || generating) {
+    const angle = (sparkTimer * (charging ? 0.18 : -0.1)) % (Math.PI*2);
+    ctx.strokeStyle = charging ? '#378add' : '#f0a500'; ctx.lineWidth = 1.5;
+    for (let s = 0; s < 6; s++) {
+      const a = angle + (s/6)*Math.PI*2;
+      ctx.beginPath(); ctx.moveTo(motorX+Math.cos(a)*4, motorY+Math.sin(a)*4); ctx.lineTo(motorX+Math.cos(a)*11, motorY+Math.sin(a)*11); ctx.stroke();
+    }
+  }
+
+  ctx.fillStyle = '#0d1117'; ctx.strokeStyle = '#2a2a3e'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.rect(320, 60, 120, 80); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#1a2a3a'; ctx.fillRect(322, 62, 116, 76);
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 4; col++) {
+      ctx.fillStyle = generating ? (Math.random() > 0.3 ? '#f0a500' : '#3a2a00') : '#1a1a2e';
+      ctx.strokeStyle = '#2a2a3e'; ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.rect(328+col*26, 68+row*22, 18, 14); ctx.fill(); ctx.stroke();
+    }
+  }
+  ctx.fillStyle = '#334'; ctx.font = '9px monospace'; ctx.fillText('GRID INTERFACE', 328, 152);
+
+  ctx.fillStyle = generating ? '#1a2a00' : '#0d1117';
+  ctx.strokeStyle = generating ? '#27c93f' : '#2a2a3e'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.rect(320, 200, 120, 50); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = generating ? '#27c93f' : '#334'; ctx.font = '10px monospace';
+  ctx.fillText('GENERATOR', 332, 220);
+  ctx.fillStyle = '#334'; ctx.font = '9px monospace';
+  ctx.fillText(generating ? Math.round(outputPower) + ' MW out' : 'standby', 332, 236);
+  if (generating) {
+    ctx.strokeStyle = '#27c93f'; ctx.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      const wave = Math.sin(sparkTimer*0.2+i*1.5)*6;
+      ctx.beginPath(); ctx.moveTo(332+i*20, 244+wave); ctx.lineTo(348+i*20, 244-wave); ctx.stroke();
+    }
+  }
+
+  for (let i = particles.length-1; i >= 0; i--) {
+    const p = particles[i];
+    ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 2, 0, Math.PI*2); ctx.fill();
+    p.x+=p.vx; p.y+=p.vy; p.vy+=0.1; p.life-=0.06;
+    if (p.life <= 0) particles.splice(i,1);
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle = '#1a3a5a'; ctx.font = '9px monospace';
+  const heightPct = Math.round(((GROUND_Y-MASS_H-massY)/(GROUND_Y-MASS_H-TOWER_TOP))*100);
+  ctx.fillText('Height: ' + Math.max(0, heightPct) + '%', tx-60, GROUND_Y-4);
+}
+
+function tick() {
+  const speed = charging ? 1.2 : generating ? 0.7 : 0;
+  if (charging) {
+    if (massY > targetY) {
+      massY = Math.max(targetY, massY - speed);
+      storedEnergy = Math.min(MAX_STORED, ((GROUND_Y-MASS_H-massY)/(GROUND_Y-MASS_H-TOWER_TOP))*MAX_STORED);
+      if (sparkTimer % 30 === 0) spawnSpark(TOWER_X+TOWER_W/2, massY, '#378add');
+    } else { stopCharge(); addLog('Mass at top — tower fully charged', 'green'); }
+  }
+  if (generating) {
+    if (massY < targetY) {
+      massY = Math.min(targetY, massY + speed);
+      storedEnergy = Math.max(0, ((GROUND_Y-MASS_H-massY)/(GROUND_Y-MASS_H-TOWER_TOP))*MAX_STORED);
+      outputPower = 30 + Math.random()*8;
+      if (sparkTimer % 20 === 0) spawnSpark(TOWER_X+TOWER_W/2, massY+MASS_H, '#f0a500');
+    } else {
+      outputPower = 0; generating = false; setStatus('idle', 'Idle');
+      const ms = getMassStage();
+      if (ms >= 0) addLog('Stage S'+(ms+1)+' discharged — mass resting on lock', 'amber');
+      else { addLog('Mass reached ground — fully discharged', 'red'); storedEnergy = 0; }
+    }
+  }
+  if (!charging && !generating) outputPower = 0;
+  sparkTimer++;
+  updateMetrics();
+  drawScene();
+  requestAnimationFrame(tick);
+}
+
+buildLocks();
+addLog('Plant online — ready', 'green');
+addLog('Wind up motor to store energy', 'blue');
+addLog('Lock stages to hold height', 'blue');
+addLog('Unlock a stage to release power', 'blue');
+tick();
+</script>
+</body>
+</html>
